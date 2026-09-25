@@ -14,7 +14,8 @@ import {
   LastNoteItem, 
   NavigationPage, 
   ScheduleEvent, 
-  Worker 
+  Worker,
+  UserSession 
 } from './types';
 import { 
   INITIAL_BUSINESS_SETTINGS, 
@@ -29,6 +30,12 @@ import {
   INITIAL_INBOX_ALGERIA 
 } from './data/algerianBusinessData';
 import { getStoredData, setStoredData, playAlarmChime } from './services/apiService';
+import { SAMPLE_USERS, USER_ROLES_CONFIG, isPageAllowed } from './services/rbacService';
+import { AuthService } from './services/authService';
+import { LoginView } from './components/LoginView';
+import { UserManagementModal } from './components/UserManagementModal';
+import { ChangePasswordModal } from './components/ChangePasswordModal';
+import { AccessDeniedView } from './components/AccessDeniedView';
 import { Sidebar } from './components/Sidebar';
 import { Header } from './components/Header';
 import { BentoDashboard } from './components/BentoDashboard';
@@ -40,6 +47,9 @@ import { SettingsView } from './components/SettingsView';
 import { PosView } from './components/PosView';
 import { InvoicesView } from './components/InvoicesView';
 import { ExpensesView } from './components/ExpensesView';
+import { FiscalLedgerView } from './components/FiscalLedgerView';
+import { CarrierTrackingView } from './components/CarrierTrackingView';
+import { CloudDatabaseView } from './components/CloudDatabaseView';
 import { AccountingExportModal } from './components/AccountingExportModal';
 import { BottomNav } from './components/BottomNav';
 import { InspectModal } from './components/InspectModal';
@@ -52,8 +62,39 @@ export const App: React.FC = () => {
     return (localStorage.getItem('algeria_biz_lang') as AppLanguage) || 'fr';
   });
 
+  // Active User Authentication Session
+  const [currentUser, setCurrentUser] = useState<UserSession | null>(() => {
+    return AuthService.getActiveSession();
+  });
+
   // Current Navigation Page
-  const [currentPage, setCurrentPage] = useState<NavigationPage>('overview');
+  const [currentPage, setCurrentPage] = useState<NavigationPage>(() => {
+    const session = AuthService.getActiveSession();
+    return session ? AuthService.getDefaultLandingPage(session.role) : 'overview';
+  });
+
+  // User Management & Password Modals
+  const [isUserManagementOpen, setIsUserManagementOpen] = useState(false);
+  const [isChangePasswordOpen, setIsChangePasswordOpen] = useState(false);
+
+  const handleSelectUser = (user: UserSession) => {
+    setCurrentUser(user);
+    AuthService.saveSession(user);
+    // If switched to a role that does not have access to current page, redirect to its landing page
+    if (!isPageAllowed(currentPage, user.role)) {
+      setCurrentPage(AuthService.getDefaultLandingPage(user.role));
+    }
+  };
+
+  const handleLoginSuccess = (session: UserSession) => {
+    setCurrentUser(session);
+    setCurrentPage(AuthService.getDefaultLandingPage(session.role));
+  };
+
+  const handleLogout = () => {
+    AuthService.logout();
+    setCurrentUser(null);
+  };
 
   // Business Data States (with persistent local storage fallback)
   const [workers, setWorkers] = useState<Worker[]>(() => {
@@ -292,7 +333,7 @@ export const App: React.FC = () => {
     ]);
   };
 
-  const handleUpdateInvoiceStatus = (id: string, newStatus: 'payee' | 'en_attente' | 'annulee') => {
+  const handleUpdateInvoiceStatus = (id: string, newStatus: 'payee' | 'en_attente' | 'annulee' | 'avoir_applique') => {
     setInvoices(prev => prev.map(inv => inv.id === id ? { ...inv, status: newStatus } : inv));
   };
 
@@ -356,6 +397,17 @@ export const App: React.FC = () => {
     else setCurrentPage('workers');
   };
 
+  // If no active user session, render the secure Algerian Business Login Portal
+  if (!currentUser) {
+    return (
+      <LoginView
+        language={language}
+        onLanguageChange={setLanguage}
+        onLoginSuccess={handleLoginSuccess}
+      />
+    );
+  }
+
   return (
     <div 
       id="app-root-layout"
@@ -371,6 +423,7 @@ export const App: React.FC = () => {
         activeAlarmsCount={activeStockAlarms.length}
         pendingInvoicesCount={invoices.filter(i => i.status === 'en_attente').length}
         language={language}
+        currentUser={currentUser}
       />
 
       {/* 2. Primary Main Content Container */}
@@ -396,12 +449,27 @@ export const App: React.FC = () => {
           }}
           searchQuery={searchQuery}
           onSearchChange={setSearchQuery}
+          currentUser={currentUser}
+          onSelectUser={handleSelectUser}
+          onOpenUserManagement={() => setIsUserManagementOpen(true)}
+          onOpenChangePassword={() => setIsChangePasswordOpen(true)}
+          onLogout={handleLogout}
         />
 
-        {/* Dynamic Page Views */}
+        {/* Dynamic Page Views with RBAC Access Protection */}
         <AnimatePresence mode="wait">
+          {!isPageAllowed(currentPage, currentUser.role) && (
+            <AccessDeniedView
+              key="access-denied"
+              pageName={currentPage}
+              currentUser={currentUser}
+              onNavigateHome={() => setCurrentPage(AuthService.getDefaultLandingPage(currentUser.role))}
+              onOpenSwitchUser={handleLogout}
+            />
+          )}
+
           {/* A. Overview Bento Dashboard */}
-          {currentPage === 'overview' && (
+          {isPageAllowed(currentPage, currentUser.role) && currentPage === 'overview' && (
             <BentoDashboard
               key="dashboard-overview"
               data={bentoData}
@@ -436,6 +504,7 @@ export const App: React.FC = () => {
               clients={clients}
               settings={settings}
               language={language}
+              currentUser={currentUser}
               onAddInvoice={(inv) => setInvoices(prev => [inv, ...prev])}
               onUpdateInvoiceStatus={handleUpdateInvoiceStatus}
               onDeleteInvoice={handleDeleteInvoice}
@@ -516,12 +585,46 @@ export const App: React.FC = () => {
               onResetData={handleResetData}
             />
           )}
+
+          {/* J. Fiscal Immutability & Audit Trail (G50) */}
+          {currentPage === 'fiscal_ledger' && (
+            <FiscalLedgerView
+              key="view-fiscal-ledger"
+              invoices={invoices}
+              language={language}
+              onNavigateToInvoice={(num) => {
+                setSearchQuery(num);
+                setCurrentPage('invoices');
+              }}
+            />
+          )}
+
+          {/* K. Carrier Tracking & Algerian Logistics (Yalidine, ZR, Procolis, Maystro) */}
+          {currentPage === 'carrier_tracking' && (
+            <CarrierTrackingView
+              key="view-carrier-tracking"
+              invoices={invoices}
+              language={language}
+            />
+          )}
+
+          {/* L. Multi-Tenant Cloud Database & Daily Encrypted Backups */}
+          {currentPage === 'cloud_backups' && (
+            <CloudDatabaseView
+              key="view-cloud-backups"
+              invoices={invoices}
+              inventory={inventory}
+              workers={workers}
+              language={language}
+            />
+          )}
         </AnimatePresence>
 
         {/* 3. Mobile Floating Bottom Pill Switcher */}
         <BottomNav
           activeTab={getLegacyTab()}
           onSelectTab={handleBottomTabSelect}
+          currentUser={currentUser}
         />
 
         {/* 4. Live MongoDB & Flask Backend Inspector */}
@@ -556,7 +659,7 @@ export const App: React.FC = () => {
           language={language}
         />
 
-        {/* 5. Element Inspector Overlay */}
+        {/* 6. Element Inspector Overlay */}
         <ElementInspectorOverlay
           isEnabled={isHoverInspectEnabled}
           onSelectElement={({ id }) => {
@@ -571,7 +674,7 @@ export const App: React.FC = () => {
           }}
         />
 
-        {/* 6. Dynamic Add Item Modal */}
+        {/* 7. Dynamic Add Item Modal */}
         <AddModal
           isOpen={addModal.isOpen}
           type={addModal.type}
@@ -588,6 +691,23 @@ export const App: React.FC = () => {
             }));
           }}
         />
+
+        {/* 8. User Management Modal (Gérant / Super-Admin) */}
+        {isUserManagementOpen && (
+          <UserManagementModal
+            currentUser={currentUser}
+            language={language}
+            onClose={() => setIsUserManagementOpen(false)}
+          />
+        )}
+
+        {/* 9. Self-Service Change Password Modal */}
+        {isChangePasswordOpen && (
+          <ChangePasswordModal
+            currentUser={currentUser}
+            onClose={() => setIsChangePasswordOpen(false)}
+          />
+        )}
       </main>
     </div>
   );

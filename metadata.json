@@ -1,6 +1,6 @@
 {
   "name": "Dashboards V2",
-  "description": "Enterprise Algerian business management suite in DZD (DA): POS retail counter with hotkeys and 80mm thermal tickets, A4 invoicing with fiscal stamps, inventory with alarms, and multi-currency payroll.",
+  "description": "Enterprise Algerian business management suite in DZD (DA) with secure username and password authentication, dedicated role-specific interfaces (Gérant, Caissier POS, Magasinier Stock, Comptable Fiscal), G50 fiscal audit ledger, carrier logistics tracking, and multi-tenant cloud storage.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

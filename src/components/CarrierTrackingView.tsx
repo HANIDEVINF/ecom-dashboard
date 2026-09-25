@@ -22,7 +22,7 @@ import {
 } from 'lucide-react';
 import { AlgerianCarrier, AppLanguage, CarrierShipment, Invoice, ParcelStatus } from '../types';
 import { ALGERIAN_CARRIERS, calculateCarrierFee, createShipment, simulateCarrierWebhookProgress } from '../services/carrierService';
-import { ALGERIAN_WILAYAS } from '../data/algerianBusinessData';
+import { ALGERIA_WILAYAS } from '../data/algerianBusinessData';
 import { formatDZD } from '../services/apiService';
 
 interface CarrierTrackingViewProps {
@@ -799,7 +799,7 @@ export const CarrierTrackingView: React.FC<CarrierTrackingViewProps> = ({
                       onChange={(e) => setNewWilaya(e.target.value)}
                       className="w-full px-3 py-2 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-slate-900 focus:bg-white font-medium"
                     >
-                      {ALGERIAN_WILAYAS.map(w => (
+                      {ALGERIA_WILAYAS.map((w: string) => (
                         <option key={w} value={w}>{w}</option>
                       ))}
                     </select>

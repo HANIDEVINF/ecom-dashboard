@@ -19,10 +19,17 @@ import {
   Trash2,
   Eye,
   PlusCircle,
-  ShieldCheck
+  ShieldCheck,
+  ShieldAlert,
+  RotateCcw,
+  Lock,
+  Scale,
+  X,
+  Check
 } from 'lucide-react';
-import { AppLanguage, BusinessSettings, ClientProfile, InventoryItem, Invoice, InvoiceItem, InvoiceType } from '../types';
+import { AppLanguage, BusinessSettings, ClientProfile, InventoryItem, Invoice, InvoiceItem, InvoiceType, UserSession } from '../types';
 import { formatDZD } from '../services/apiService';
+import { FiscalLedgerManager } from '../services/fiscalLedgerService';
 import { PrintInvoiceModal } from './PrintInvoiceModal';
 
 interface InvoicesViewProps {
@@ -31,8 +38,9 @@ interface InvoicesViewProps {
   inventory: InventoryItem[];
   settings: BusinessSettings;
   language: AppLanguage;
+  currentUser?: UserSession;
   onAddInvoice: (invoice: Invoice) => void;
-  onUpdateInvoiceStatus: (id: string, newStatus: 'payee' | 'en_attente' | 'annulee') => void;
+  onUpdateInvoiceStatus: (id: string, newStatus: 'payee' | 'en_attente' | 'annulee' | 'avoir_applique') => void;
   onDeleteInvoice: (id: string) => void;
   onOpenAccountingExport: () => void;
 }
@@ -43,12 +51,13 @@ export const InvoicesView: React.FC<InvoicesViewProps> = ({
   inventory,
   settings,
   language,
+  currentUser,
   onAddInvoice,
   onUpdateInvoiceStatus,
   onDeleteInvoice,
   onOpenAccountingExport
 }) => {
-  const [filterType, setFilterType] = useState<'all' | 'facture' | 'bon_livraison' | 'proforma'>('all');
+  const [filterType, setFilterType] = useState<'all' | 'facture' | 'avoir' | 'bon_livraison' | 'proforma'>('all');
   const [filterStatus, setFilterStatus] = useState<'all' | 'payee' | 'en_attente'>('all');
   const [searchQuery, setSearchQuery] = useState('');
   
@@ -58,6 +67,11 @@ export const InvoicesView: React.FC<InvoicesViewProps> = ({
 
   // New Invoice Modal
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+
+  // Fiscal Compliance Modals
+  const [fiscalBlockedDeleteInvoice, setFiscalBlockedDeleteInvoice] = useState<Invoice | null>(null);
+  const [avoirTargetInvoice, setAvoirTargetInvoice] = useState<Invoice | null>(null);
+  const [avoirReason, setAvoirReason] = useState('Marchandise défectueuse / non conforme');
   const [newDocType, setNewDocType] = useState<InvoiceType>('facture');
   const [selectedClientId, setSelectedClientId] = useState<string>(clients[0]?.id || 'custom');
   const [customClientName, setCustomClientName] = useState('');
@@ -140,8 +154,7 @@ export const InvoicesView: React.FC<InvoicesViewProps> = ({
     const tvaAmount = Math.round(effectiveBase * tvaRate);
     const totalTTC = effectiveBase + tvaAmount;
 
-    const prefix = newDocType === 'facture' ? 'FAC' : newDocType === 'bon_livraison' ? 'BL' : 'PRO';
-    const num = `${prefix}-2026-${Math.floor(1000 + Math.random() * 9000)}`;
+    const num = FiscalLedgerManager.getNextDocumentNumber(newDocType, invoices);
     const today = new Date().toISOString().slice(0, 10);
 
     const newInvoice: Invoice = {
@@ -166,10 +179,19 @@ export const InvoicesView: React.FC<InvoicesViewProps> = ({
       totalTTC,
       paymentMethod: newPaymentMethod,
       status: 'en_attente',
-      notes: newNotes || undefined
+      notes: newNotes || undefined,
+      isLocked: newDocType === 'facture'
     };
 
     onAddInvoice(newInvoice);
+
+    // Register into append-only cryptographic fiscal ledger
+    FiscalLedgerManager.appendEntry(
+      newInvoice,
+      currentUser?.name || 'Yacine Mansouri',
+      currentUser?.role || 'gerant'
+    ).catch(err => console.error('Fiscal ledger error:', err));
+
     setIsCreateModalOpen(false);
     setNewInvoiceItems([]);
     setNewDiscountDA(0);
@@ -177,6 +199,48 @@ export const InvoicesView: React.FC<InvoicesViewProps> = ({
 
     // Open printable modal right away
     setSelectedInvoiceForPrint(newInvoice);
+    setIsPrintModalOpen(true);
+  };
+
+  // Intercept invoice deletion under Algerian Commercial Law & DGI G50 rules
+  const handleRequestDelete = (inv: Invoice) => {
+    if (inv.type === 'facture' || inv.type === 'avoir') {
+      // Deleting a validated invoice is illegal under Art. 11/12 Code de Commerce
+      setFiscalBlockedDeleteInvoice(inv);
+    } else {
+      // Proformas and non-fiscal draft slips can be deleted
+      onDeleteInvoice(inv.id);
+    }
+  };
+
+  // Create official Facture d'Avoir (Credit Note)
+  const handleConfirmCreateAvoir = async () => {
+    if (!avoirTargetInvoice) return;
+
+    const { avoirInvoice, updatedOriginal } = FiscalLedgerManager.createAvoir(
+      avoirTargetInvoice,
+      avoirReason,
+      currentUser?.name || 'Direction Générale',
+      currentUser?.role || 'gerant',
+      invoices
+    );
+
+    // Update original status to avoir_applique
+    onUpdateInvoiceStatus(avoirTargetInvoice.id, 'avoir_applique');
+
+    // Add new Avoir invoice
+    onAddInvoice(avoirInvoice);
+
+    // Append to fiscal ledger
+    await FiscalLedgerManager.appendEntry(
+      avoirInvoice,
+      currentUser?.name || 'Direction Générale',
+      currentUser?.role || 'gerant'
+    );
+
+    setAvoirTargetInvoice(null);
+    setFiscalBlockedDeleteInvoice(null);
+    setSelectedInvoiceForPrint(avoirInvoice);
     setIsPrintModalOpen(true);
   };
 
@@ -322,6 +386,7 @@ export const InvoicesView: React.FC<InvoicesViewProps> = ({
           {[
             { id: 'all', label: language === 'ar' ? 'جميع الوثائق' : 'Tous' },
             { id: 'facture', label: language === 'ar' ? 'فواتير رسمية' : 'Factures' },
+            { id: 'avoir', label: language === 'ar' ? 'فواتير الإلغاء (Avoirs)' : 'Avoirs (Notes de Crédit)' },
             { id: 'bon_livraison', label: language === 'ar' ? 'وصولات تسليم (BL)' : 'Bons de Livraison' },
             { id: 'proforma', label: language === 'ar' ? 'فواتير شكلية' : 'Proformas' }
           ].map(tab => (
@@ -404,10 +469,13 @@ export const InvoicesView: React.FC<InvoicesViewProps> = ({
                     <td className="py-3.5 px-4">
                       <span className={`inline-block text-[9px] font-black uppercase px-2 py-0.5 rounded-md ${
                         inv.type === 'facture' ? 'bg-indigo-100 text-indigo-800 border border-indigo-200' :
+                        inv.type === 'avoir' ? 'bg-purple-100 text-purple-900 border border-purple-200 font-bold' :
                         inv.type === 'bon_livraison' ? 'bg-amber-100 text-amber-900 border border-amber-200' :
                         'bg-slate-100 text-slate-800 border border-slate-200'
                       }`}>
-                        {inv.type === 'facture' ? 'FACTURE' : inv.type === 'bon_livraison' ? 'BON LIVRAISON' : 'PROFORMA'}
+                        {inv.type === 'facture' ? 'FACTURE' : 
+                         inv.type === 'avoir' ? 'AVOIR (CRÉDIT)' :
+                         inv.type === 'bon_livraison' ? 'BON LIVRAISON' : 'PROFORMA'}
                       </span>
                     </td>
 
@@ -434,18 +502,22 @@ export const InvoicesView: React.FC<InvoicesViewProps> = ({
                     </td>
 
                     {/* HT */}
-                    <td className="py-3.5 px-4 text-right font-mono text-slate-600">
-                      {formatDZD(inv.subtotalHT, language)}
+                    <td className={`py-3.5 px-4 text-right font-mono ${inv.type === 'avoir' ? 'text-purple-700 font-bold' : 'text-slate-600'}`}>
+                      {inv.type === 'avoir' ? `-${formatDZD(inv.subtotalHT, language)}` : formatDZD(inv.subtotalHT, language)}
                     </td>
 
                     {/* TVA */}
-                    <td className="py-3.5 px-4 text-right font-mono text-slate-500">
-                      {inv.tvaAmountDZD > 0 ? formatDZD(inv.tvaAmountDZD, language) : '0 DA'}
+                    <td className={`py-3.5 px-4 text-right font-mono ${inv.type === 'avoir' ? 'text-purple-600' : 'text-slate-500'}`}>
+                      {inv.type === 'avoir' 
+                        ? `-${formatDZD(inv.tvaAmountDZD, language)}`
+                        : inv.tvaAmountDZD > 0 ? formatDZD(inv.tvaAmountDZD, language) : '0 DA'}
                     </td>
 
                     {/* TTC */}
-                    <td className="py-3.5 px-4 text-right font-mono font-black text-slate-950 text-xs">
-                      {formatDZD(inv.totalTTC, language)}
+                    <td className={`py-3.5 px-4 text-right font-mono font-black text-xs ${
+                      inv.type === 'avoir' ? 'text-purple-900' : 'text-slate-950'
+                    }`}>
+                      {inv.type === 'avoir' ? `-${formatDZD(inv.totalTTC, language)}` : formatDZD(inv.totalTTC, language)}
                     </td>
 
                     {/* Payment Method */}
@@ -459,20 +531,26 @@ export const InvoicesView: React.FC<InvoicesViewProps> = ({
 
                     {/* Status Toggle Button */}
                     <td className="py-3.5 px-4 text-center">
-                      <button
-                        onClick={() => {
-                          const nextStatus = inv.status === 'payee' ? 'en_attente' : 'payee';
-                          onUpdateInvoiceStatus(inv.id, nextStatus);
-                        }}
-                        className={`text-[9px] font-bold uppercase px-2.5 py-1 rounded-full cursor-pointer transition-all ${
-                          inv.status === 'payee'
-                            ? 'bg-emerald-100 text-emerald-800 hover:bg-emerald-200 border border-emerald-200'
-                            : 'bg-amber-100 text-amber-800 hover:bg-amber-200 border border-amber-200'
-                        }`}
-                        title="Cliquer pour changer l'état du paiement"
-                      >
-                        {inv.status === 'payee' ? 'Payée ✓' : 'En attente'}
-                      </button>
+                      {inv.status === 'avoir_applique' ? (
+                        <span className="text-[9px] font-bold uppercase px-2.5 py-1 rounded-full bg-rose-100 text-rose-800 border border-rose-200">
+                          Annulée par Avoir
+                        </span>
+                      ) : (
+                        <button
+                          onClick={() => {
+                            const nextStatus = inv.status === 'payee' ? 'en_attente' : 'payee';
+                            onUpdateInvoiceStatus(inv.id, nextStatus);
+                          }}
+                          className={`text-[9px] font-bold uppercase px-2.5 py-1 rounded-full cursor-pointer transition-all ${
+                            inv.status === 'payee'
+                              ? 'bg-emerald-100 text-emerald-800 hover:bg-emerald-200 border border-emerald-200'
+                              : 'bg-amber-100 text-amber-800 hover:bg-amber-200 border border-amber-200'
+                          }`}
+                          title="Cliquer pour changer l'état du paiement"
+                        >
+                          {inv.status === 'payee' ? 'Payée ✓' : 'En attente'}
+                        </button>
+                      )}
                     </td>
 
                     {/* Actions */}
@@ -488,12 +566,32 @@ export const InvoicesView: React.FC<InvoicesViewProps> = ({
                         >
                           <Printer size={13} />
                         </button>
+
+                        {/* Émettre Avoir Button for Validated Invoices */}
+                        {inv.type === 'facture' && inv.status !== 'avoir_applique' && (
+                          <button
+                            onClick={() => {
+                              setAvoirTargetInvoice(inv);
+                              setAvoirReason('Marchandise défectueuse / non conforme');
+                            }}
+                            className="p-1.5 bg-purple-50 hover:bg-purple-700 hover:text-white text-purple-700 border border-purple-200 rounded-lg transition-all cursor-pointer shadow-2xs flex items-center gap-1 text-[10px] font-bold"
+                            title="Émettre une Facture d'Avoir (Annulation / Rectification Fiscale)"
+                          >
+                            <RotateCcw size={12} />
+                            <span className="hidden xl:inline">Avoir</span>
+                          </button>
+                        )}
+
                         <button
-                          onClick={() => onDeleteInvoice(inv.id)}
+                          onClick={() => handleRequestDelete(inv)}
                           className="p-1.5 text-slate-300 hover:text-rose-600 rounded-lg transition-all cursor-pointer"
-                          title="Supprimer"
+                          title={inv.type === 'facture' || inv.type === 'avoir' ? "Réglementation Fiscale G50 : Suppression Encadrée" : "Supprimer"}
                         >
-                          <Trash2 size={13} />
+                          {inv.type === 'facture' || inv.type === 'avoir' ? (
+                            <Lock size={13} className="text-slate-400 hover:text-rose-500" />
+                          ) : (
+                            <Trash2 size={13} />
+                          )}
                         </button>
                       </div>
                     </td>
@@ -739,6 +837,181 @@ export const InvoicesView: React.FC<InvoicesViewProps> = ({
                 </button>
               </div>
 
+            </motion.div>
+          </div>
+        )}
+
+        {/* Modal: Interception Fiscale de Suppression (Art. 11/12 Code de Commerce Algérien) */}
+        {fiscalBlockedDeleteInvoice && (
+          <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="bg-white rounded-3xl shadow-2xl border border-rose-200 w-full max-w-lg overflow-hidden"
+            >
+              <div className="bg-rose-950 text-white p-5 flex items-center justify-between border-b border-rose-900">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-8 h-8 rounded-full bg-rose-500/20 text-rose-400 flex items-center justify-center border border-rose-500/30">
+                    <ShieldAlert size={18} />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-bold text-white">Suppression Fiscale Interdite</h3>
+                    <p className="text-[10px] text-rose-300 font-mono">Conformité DGI • Code de Commerce Algérien</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setFiscalBlockedDeleteInvoice(null)}
+                  className="p-1 rounded-lg text-rose-300 hover:text-white hover:bg-rose-900/50"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+
+              <div className="p-5 space-y-4 text-xs text-slate-600 leading-relaxed">
+                <div className="p-3 bg-rose-50 border border-rose-100 rounded-2xl flex items-start gap-2.5 text-rose-900">
+                  <Lock size={16} className="text-rose-600 shrink-0 mt-0.5" />
+                  <div>
+                    <p className="font-bold text-[11px] text-rose-950">
+                      La facture {fiscalBlockedDeleteInvoice.number} est enregistrée et verrouillée
+                    </p>
+                    <p className="text-[10px] text-rose-700 mt-0.5">
+                      En droit commercial et fiscal algérien (Articles 11 & 12 du Code de Commerce, Déclaration Mensuelle G50), les factures validées ne peuvent être détruites ou supprimées.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="space-y-2 text-slate-700">
+                  <p className="font-semibold text-slate-900">
+                    Pourquoi cette protection est-elle active ?
+                  </p>
+                  <ul className="space-y-1.5 list-disc list-inside text-[11px] text-slate-600">
+                    <li><strong className="text-slate-800">Continuité séquentielle :</strong> La suppression créerait un "trou de numérotation" dans le livre journal des ventes, passible de sanctions lors d'un contrôle fiscal.</li>
+                    <li><strong className="text-slate-800">Neutralisation légale :</strong> Pour annuler ou rectifier une créance, la procédure réglementaire obligatoire consiste à émettre une <strong className="text-purple-700">Facture d'Avoir</strong> (Note de Crédit).</li>
+                  </ul>
+                </div>
+
+                <div className="p-3 bg-purple-50 rounded-2xl border border-purple-100 flex items-center justify-between text-xs">
+                  <div>
+                    <span className="text-[10px] font-bold text-purple-700 uppercase tracking-wider block">Montant à régulariser</span>
+                    <span className="font-bold font-mono text-purple-950 text-sm">{formatDZD(fiscalBlockedDeleteInvoice.totalTTC, language)}</span>
+                  </div>
+                  <span className="text-[10px] font-mono px-2 py-1 bg-purple-100 text-purple-800 rounded-lg font-bold">
+                    TVA 19%: {formatDZD(fiscalBlockedDeleteInvoice.tvaAmountDZD, language)}
+                  </span>
+                </div>
+              </div>
+
+              <div className="bg-slate-50 p-4 border-t border-slate-200 flex items-center justify-end gap-2">
+                <button
+                  onClick={() => setFiscalBlockedDeleteInvoice(null)}
+                  className="px-4 py-2 border border-slate-200 rounded-xl text-xs font-bold text-slate-700 hover:bg-slate-100 cursor-pointer"
+                >
+                  Fermer
+                </button>
+                <button
+                  onClick={() => {
+                    const target = fiscalBlockedDeleteInvoice;
+                    setFiscalBlockedDeleteInvoice(null);
+                    setAvoirTargetInvoice(target);
+                    setAvoirReason('Annulation de commande / Régularisation fiscale');
+                  }}
+                  className="px-4 py-2 bg-purple-700 text-white rounded-xl text-xs font-bold hover:bg-purple-800 cursor-pointer shadow-xs flex items-center gap-1.5"
+                >
+                  <RotateCcw size={13} />
+                  <span>Émettre une Facture d'Avoir</span>
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+
+        {/* Modal: Émission d'une Facture d'Avoir (Credit Note) */}
+        {avoirTargetInvoice && (
+          <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="bg-white rounded-3xl shadow-2xl border border-purple-200 w-full max-w-lg overflow-hidden"
+            >
+              <div className="bg-purple-950 text-white p-5 flex items-center justify-between border-b border-purple-900">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-8 h-8 rounded-full bg-purple-500/20 text-purple-300 flex items-center justify-center border border-purple-500/30">
+                    <RotateCcw size={18} />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-bold text-white">Émettre une Facture d'Avoir</h3>
+                    <p className="text-[10px] text-purple-300 font-mono">Annulation / Rectification Fiscale DGI</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setAvoirTargetInvoice(null)}
+                  className="p-1 rounded-lg text-purple-300 hover:text-white hover:bg-purple-900/50"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+
+              <div className="p-5 space-y-4 text-xs">
+                <div className="p-3 bg-purple-50/70 border border-purple-100 rounded-2xl">
+                  <div className="flex items-center justify-between text-[11px] mb-1">
+                    <span className="text-slate-500">Facture d'origine :</span>
+                    <span className="font-bold font-mono text-purple-900">{avoirTargetInvoice.number}</span>
+                  </div>
+                  <div className="flex items-center justify-between text-[11px] mb-1">
+                    <span className="text-slate-500">Client :</span>
+                    <span className="font-bold text-slate-800">{avoirTargetInvoice.clientCompany || avoirTargetInvoice.clientName}</span>
+                  </div>
+                  <div className="flex items-center justify-between text-[11px]">
+                    <span className="text-slate-500">Montant crédité :</span>
+                    <span className="font-mono font-black text-rose-700">-{formatDZD(avoirTargetInvoice.totalTTC, language)}</span>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="text-[10px] font-bold text-slate-700 uppercase tracking-wider block mb-1.5">
+                    Motif réglementaire de l'Avoir
+                  </label>
+                  <select
+                    value={avoirReason}
+                    onChange={e => setAvoirReason(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-semibold text-slate-800 focus:ring-2 focus:ring-purple-700 outline-none"
+                  >
+                    <option value="Marchandise défectueuse / non conforme">Marchandise défectueuse / non conforme</option>
+                    <option value="Erreur de facturation / Ristourne commerciale">Erreur de facturation / Ristourne commerciale</option>
+                    <option value="Annulation de commande / Rétractation client">Annulation de commande / Rétractation client</option>
+                    <option value="Retour physique au stock magasin">Retour physique au stock magasin</option>
+                    <option value="Régularisation comptable de fin d'exercice">Régularisation comptable de fin d'exercice</option>
+                  </select>
+                </div>
+
+                <div className="p-3 bg-slate-50 rounded-2xl border border-slate-200 text-[11px] text-slate-600 space-y-1">
+                  <div className="flex items-center gap-1.5 text-slate-800 font-bold">
+                    <Check size={14} className="text-emerald-600" />
+                    <span>Effets de la validation :</span>
+                  </div>
+                  <p>• Génère un numéro officiel séquentiel (ex: AVOIR-2026-0001).</p>
+                  <p>• Inscrit la transaction dans le registre immuable (hachage cryptographique).</p>
+                  <p>• Déduit automatiquement le montant de la TVA collectée sur la déclaration G50.</p>
+                </div>
+              </div>
+
+              <div className="bg-slate-50 p-4 border-t border-slate-200 flex items-center justify-end gap-2">
+                <button
+                  onClick={() => setAvoirTargetInvoice(null)}
+                  className="px-4 py-2 border border-slate-200 rounded-xl text-xs font-bold text-slate-700 hover:bg-slate-100 cursor-pointer"
+                >
+                  Annuler
+                </button>
+                <button
+                  onClick={handleConfirmCreateAvoir}
+                  className="px-4 py-2 bg-purple-700 text-white rounded-xl text-xs font-bold hover:bg-purple-800 cursor-pointer shadow-xs flex items-center gap-1.5"
+                >
+                  <Check size={14} />
+                  <span>Confirmer & Émettre l'Avoir</span>
+                </button>
+              </div>
             </motion.div>
           </div>
         )}

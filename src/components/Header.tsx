@@ -10,8 +10,9 @@ import {
   Building2,
   MapPin
 } from 'lucide-react';
-import { AppLanguage, BusinessSettings } from '../types';
+import { AppLanguage, BusinessSettings, UserSession } from '../types';
 import { TRANSLATIONS } from '../i18n/translations';
+import { RbacHeaderBar } from './RbacHeaderBar';
 
 interface HeaderProps {
   settings: BusinessSettings;
@@ -26,6 +27,11 @@ interface HeaderProps {
   onNotificationsClick: () => void;
   searchQuery: string;
   onSearchChange: (q: string) => void;
+  currentUser?: UserSession;
+  onSelectUser?: (user: UserSession) => void;
+  onOpenUserManagement?: () => void;
+  onOpenChangePassword?: () => void;
+  onLogout?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -40,7 +46,12 @@ export const Header: React.FC<HeaderProps> = ({
   unreadAlertsCount,
   onNotificationsClick,
   searchQuery,
-  onSearchChange
+  onSearchChange,
+  currentUser,
+  onSelectUser,
+  onOpenUserManagement,
+  onOpenChangePassword,
+  onLogout
 }) => {
   const t = TRANSLATIONS[language];
   const isRtl = language === 'ar';
@@ -223,6 +234,17 @@ export const Header: React.FC<HeaderProps> = ({
             Ctrl+I
           </span>
         </button>
+
+        {/* 8. RBAC Role Switcher & Security Identity */}
+        {currentUser && onSelectUser && (
+          <RbacHeaderBar 
+            currentUser={currentUser}
+            onSelectUser={onSelectUser}
+            onOpenUserManagement={onOpenUserManagement}
+            onOpenChangePassword={onOpenChangePassword}
+            onLogout={onLogout}
+          />
+        )}
 
       </div>
     </header>

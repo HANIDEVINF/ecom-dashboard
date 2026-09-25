@@ -17,7 +17,8 @@ import {
 import { INITIAL_FISCAL_LEDGER, GENESIS_HASH } from './src/services/fiscalLedgerService';
 import { ALGERIAN_CARRIERS, calculateCarrierFee, generateTrackingNumber } from './src/services/carrierService';
 import { INITIAL_BACKUPS } from './src/services/cloudDatabaseService';
-import { AlgerianCarrier, CarrierShipment, ParcelStatus } from './src/types';
+import { INITIAL_USER_ACCOUNTS } from './src/services/authService';
+import { AlgerianCarrier, CarrierShipment, ParcelStatus, UserAccount } from './src/types';
 
 // Multi-Tenant Cloud Database & Fiscal Ledger State
 let multiTenantStore = {
@@ -25,6 +26,7 @@ let multiTenantStore = {
   engine: (process.env.DATABASE_URL ? 'postgresql' : 'mongodb_atlas') as 'mongodb_atlas' | 'postgresql' | 'hybrid_vault',
   connected: true,
   settings: { ...INITIAL_BUSINESS_SETTINGS },
+  users: [...INITIAL_USER_ACCOUNTS] as UserAccount[],
   workers: [...INITIAL_WORKERS],
   inventory: [...INITIAL_INVENTORY],
   clients: [...INITIAL_CLIENTS],
@@ -74,6 +76,94 @@ async function startServer() {
       activeShipments: multiTenantStore.shipments.length,
       timestamp: new Date().toISOString()
     });
+  });
+
+  // --- AUTHENTICATION & USER MANAGEMENT API ---
+  app.post('/api/auth/login', (req, res) => {
+    const { username, password } = req.body;
+    const trimmedUser = (username || '').trim().toLowerCase();
+    const trimmedPass = (password || '').trim();
+
+    const account = multiTenantStore.users.find(u => 
+      u.username.toLowerCase() === trimmedUser || 
+      u.email.toLowerCase() === trimmedUser
+    );
+
+    if (!account) {
+      return res.status(401).json({ error: 'Identifiant introuvable dans le système.' });
+    }
+
+    if (account.password !== trimmedPass) {
+      return res.status(401).json({ error: 'Mot de passe incorrect.' });
+    }
+
+    const now = new Date().toISOString().replace('T', ' ').slice(0, 16);
+    account.lastLogin = now;
+
+    res.json({
+      success: true,
+      session: {
+        id: account.id,
+        username: account.username,
+        name: account.name,
+        role: account.role,
+        roleTitle: account.roleTitle,
+        email: account.email,
+        wilaya: account.wilaya,
+        avatarColor: account.avatarColor,
+        avatarIcon: account.avatarIcon,
+        loginTimestamp: now,
+        token: `token_dz_${account.role}_${Date.now()}`
+      }
+    });
+  });
+
+  app.get('/api/auth/users', (req, res) => {
+    if (req.userRole !== 'gerant') {
+      return res.status(403).json({ error: 'Seul le Gérant peut administrer les comptes utilisateurs.' });
+    }
+    res.json(multiTenantStore.users);
+  });
+
+  app.post('/api/auth/users', (req, res) => {
+    if (req.userRole !== 'gerant') {
+      return res.status(403).json({ error: 'Seul le Gérant peut créer de nouveaux profils.' });
+    }
+    const { username, password, name, role, roleTitle, email, phone, wilaya, avatarIcon, avatarColor } = req.body;
+    const cleanUser = (username || '').trim().toLowerCase();
+
+    if (multiTenantStore.users.some(u => u.username.toLowerCase() === cleanUser)) {
+      return res.status(400).json({ error: `L'identifiant "${cleanUser}" est déjà utilisé.` });
+    }
+
+    const newUser: UserAccount = {
+      id: `usr-${Date.now()}`,
+      username: cleanUser,
+      password: password || 'atlas2026',
+      name: name || 'Collaborateur',
+      role: role || 'caissier',
+      roleTitle: roleTitle || 'Collaborateur',
+      email: email || `${cleanUser}@atlas-algerie.dz`,
+      phone: phone || '+213 ',
+      wilaya: wilaya || '16 - Alger',
+      avatarColor: avatarColor || 'bg-slate-900 text-white',
+      avatarIcon: avatarIcon || '👤',
+      createdAt: new Date().toISOString().slice(0, 10),
+      isCustom: true
+    };
+
+    multiTenantStore.users.push(newUser);
+    res.status(201).json(newUser);
+  });
+
+  app.put('/api/auth/users/:id/password', (req, res) => {
+    const { id } = req.params;
+    const { newPassword } = req.body;
+    const user = multiTenantStore.users.find(u => u.id === id);
+    if (!user) return res.status(404).json({ error: 'Utilisateur introuvable.' });
+
+    user.password = (newPassword || '').trim();
+    res.json({ success: true, message: 'Mot de passe mis à jour avec succès.' });
   });
 
   // 1. FISCAL IMMUTABILITY & AUDIT TRAIL (CONFORMITÉ G50)

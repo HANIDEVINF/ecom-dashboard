@@ -84,39 +84,51 @@ export const USER_ROLES_CONFIG: Record<UserRole, {
 export const SAMPLE_USERS: UserSession[] = [
   {
     id: 'usr-1',
+    username: 'gerant',
     name: 'Yacine Mansouri',
     role: 'gerant',
     roleTitle: 'Directeur Général & Fondateur',
     email: 'direction@atlas-algerie.dz',
     wilaya: '16 - Alger',
-    avatarColor: 'bg-slate-900 text-[#e4fc65]'
+    avatarColor: 'bg-slate-900 text-[#e4fc65]',
+    avatarIcon: '👑',
+    loginTimestamp: '2026-09-22 08:30'
   },
   {
     id: 'usr-2',
+    username: 'caissier',
     name: 'Karim Belkacem',
     role: 'caissier',
     roleTitle: 'Caissier Caisse Centrale 01',
     email: 'caisse01@atlas-algerie.dz',
     wilaya: '16 - Alger',
-    avatarColor: 'bg-amber-500 text-white'
+    avatarColor: 'bg-amber-500 text-white',
+    avatarIcon: '🛒',
+    loginTimestamp: '2026-09-22 08:45'
   },
   {
     id: 'usr-3',
+    username: 'magasinier',
     name: 'Sofiane Haddad',
     role: 'magasinier',
     roleTitle: 'Chef Magasinier Dépôt Principal',
     email: 'stock@atlas-algerie.dz',
     wilaya: '16 - Alger',
-    avatarColor: 'bg-sky-500 text-white'
+    avatarColor: 'bg-sky-500 text-white',
+    avatarIcon: '📦',
+    loginTimestamp: '2026-09-22 08:15'
   },
   {
     id: 'usr-4',
+    username: 'comptable',
     name: 'Amina Bouzid',
     role: 'comptable',
     roleTitle: 'Comptable Agréée & Fiscaliste G50',
     email: 'compta@atlas-algerie.dz',
     wilaya: '31 - Oran',
-    avatarColor: 'bg-emerald-600 text-white'
+    avatarColor: 'bg-emerald-600 text-white',
+    avatarIcon: '📑',
+    loginTimestamp: '2026-09-22 07:50'
   }
 ];
 

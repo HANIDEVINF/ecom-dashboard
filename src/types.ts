@@ -80,6 +80,8 @@ export interface Worker {
   cnasNumber?: string; // Algerian Social Security
 }
 
+export type WorkerProfile = Worker;
+
 export interface InventoryItem {
   id: string;
   name: {
@@ -220,14 +222,35 @@ export type InvoiceType = 'facture' | 'bon_livraison' | 'proforma' | 'avoir';
 
 export type UserRole = 'gerant' | 'caissier' | 'magasinier' | 'comptable';
 
+export interface UserAccount {
+  id: string;
+  username: string;
+  password: string;
+  name: string;
+  role: UserRole;
+  roleTitle: string;
+  email: string;
+  phone?: string;
+  wilaya: string;
+  avatarColor: string;
+  avatarIcon: string;
+  lastLogin?: string;
+  createdAt: string;
+  isCustom?: boolean;
+}
+
 export interface UserSession {
   id: string;
+  username: string;
   name: string;
   role: UserRole;
   roleTitle: string;
   email: string;
   wilaya: string;
   avatarColor: string;
+  avatarIcon?: string;
+  loginTimestamp?: string;
+  token?: string;
 }
 
 export type AlgerianCarrier = 'yalidine' | 'zr_express' | 'procolis' | 'maystro';

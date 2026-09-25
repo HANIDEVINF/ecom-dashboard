@@ -7,14 +7,19 @@ import {
   Calendar as CalendarIcon, 
   DollarSign, 
   Settings, 
-  Code2,
-  AlertTriangle,
-  ShoppingCart,
-  FileText,
-  Receipt
+  Code2, 
+  AlertTriangle, 
+  ShoppingCart, 
+  FileText, 
+  Receipt,
+  ShieldCheck,
+  Truck,
+  Database,
+  Lock
 } from 'lucide-react';
-import { AppLanguage, NavigationPage } from '../types';
+import { AppLanguage, NavigationPage, UserSession } from '../types';
 import { TRANSLATIONS } from '../i18n/translations';
+import { USER_ROLES_CONFIG } from '../services/rbacService';
 
 interface SidebarProps {
   activePage: NavigationPage;
@@ -25,6 +30,7 @@ interface SidebarProps {
   activeAlarmsCount: number;
   pendingInvoicesCount?: number;
   language: AppLanguage;
+  currentUser?: UserSession;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -35,12 +41,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
   activeWorkersCount,
   activeAlarmsCount,
   pendingInvoicesCount = 0,
-  language
+  language,
+  currentUser
 }) => {
   const t = TRANSLATIONS[language];
   const isRtl = language === 'ar';
 
-  const navItems: Array<{
+  const allNavItems: Array<{
     id: NavigationPage;
     label: string;
     icon: React.ReactNode;
@@ -63,6 +70,16 @@ export const Sidebar: React.FC<SidebarProps> = ({
       icon: <FileText size={19} />,
       badge: pendingInvoicesCount > 0 ? pendingInvoicesCount : undefined,
       badgeColor: 'bg-amber-500 text-slate-950 font-bold'
+    },
+    {
+      id: 'fiscal_ledger',
+      label: language === 'ar' ? 'السجل الجبائي G50' : 'Livre Fiscal G50',
+      icon: <ShieldCheck size={19} className="text-[#e4fc65]" />
+    },
+    {
+      id: 'carrier_tracking',
+      label: language === 'ar' ? 'تتبع الطرود والتوصيل' : 'Colis & Transporteurs',
+      icon: <Truck size={19} />
     },
     {
       id: 'inventory',
@@ -99,11 +116,22 @@ export const Sidebar: React.FC<SidebarProps> = ({
       icon: <DollarSign size={19} />
     },
     {
+      id: 'cloud_backups',
+      label: language === 'ar' ? 'النسخ السحابي المشفر' : 'Base Cloud & Backups',
+      icon: <Database size={19} />
+    },
+    {
       id: 'settings',
       label: t.nav.settings,
       icon: <Settings size={19} />
     }
   ];
+
+  // RBAC Filtering: If user has restricted role, only show permitted pages
+  const allowedPages = currentUser ? USER_ROLES_CONFIG[currentUser.role].allowedPages : null;
+  const navItems = allowedPages 
+    ? allNavItems.filter(item => allowedPages.includes(item.id))
+    : allNavItems;
 
   return (
     <aside 
@@ -114,8 +142,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
       <div className="flex flex-col items-center gap-6">
         <button 
           id="btn-brand-logo"
-          title="Dashboards V2 - Algérie"
-          onClick={() => onSelectPage('overview')}
+          title="Atlas Business Suite DZ"
+          onClick={() => {
+            const landing = currentUser ? (USER_ROLES_CONFIG[currentUser.role].allowedPages.includes('overview') ? 'overview' : USER_ROLES_CONFIG[currentUser.role].allowedPages[0]) : 'overview';
+            onSelectPage(landing);
+          }}
           className="w-11 h-11 rounded-2xl bg-white/10 hover:bg-white/20 flex items-center justify-center text-white transition-all active:scale-95 group relative shadow-md"
         >
           {/* Subtle Algeria Green/Red/White motif */}

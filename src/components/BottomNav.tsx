@@ -1,12 +1,18 @@
 import React from 'react';
-import { DashboardTab } from '../types';
+import { DashboardTab, UserSession } from '../types';
 
 interface BottomNavProps {
   activeTab: DashboardTab;
   onSelectTab: (tab: DashboardTab) => void;
+  currentUser?: UserSession;
 }
 
-export const BottomNav: React.FC<BottomNavProps> = ({ activeTab, onSelectTab }) => {
+export const BottomNav: React.FC<BottomNavProps> = ({ activeTab, onSelectTab, currentUser }) => {
+  // If user is Caissier, hide legacy dashboard switcher as they are in focused POS mode
+  if (currentUser?.role === 'caissier') {
+    return null;
+  }
+
   const tabs: DashboardTab[] = ["Dashboard", "Dashboard 1", "Dashboard 2"];
 
   return (
